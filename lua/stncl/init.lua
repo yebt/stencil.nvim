@@ -135,11 +135,6 @@ function M.load_template(tmplt)
   end
 end
 
--- TODO:
--- Allow wildcards
--- Allow put cursor position
--- Allow put handlers
--- Allow resolve templates by ft
 
 function M.setup(lopts)
   default_config = vim.tbl_deep_extend('force', default_config, lopts or {})
