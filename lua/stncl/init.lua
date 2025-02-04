@@ -19,13 +19,15 @@ local default_config = {
 -- local default_handler = function(context, template)
 local default_handler = function()
   return {
-    _date_ = os.date('%Y-%m-%d'),
+    -- _date_ = os.date('%Y-%m-%d'),
+    _date_ = utils.format_date(),
     _file_name_ = vim.fn.expand('%:t'),
     _upper_file_ = vim.fn.expand('%:t:r'):upper(),
     _camel_case_file_ = utils.snake_to_camel(vim.fn.expand('%:t:r')),
     _author_ = default_config.author,
     _email_ = default_config.email,
     _variable_ = utils.to_variable_name(vim.fn.expand('%:t:r')),
+    _os_ = utils.get_os(),
   }
 end
 
