@@ -26,7 +26,7 @@ function M.process_cursor(content)
   for i, line in ipairs(lines) do
     local col = line:find('{{_cursor_}}')
     if col then
-      cursor_pos = { i - 1, col - 1 }
+      cursor_pos = { i , col - 1 }
       lines[i] = line:gsub('{{_cursor_}}', '')
       break
     end

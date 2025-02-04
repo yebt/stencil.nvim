@@ -66,7 +66,6 @@ end
 
 --- Function to load template content
 local function load_template_content(tmplt_path)
-
   local content = table.concat(vim.fn.readfile(tmplt_path), '\n')
   local context = {
     fileapth = vim.fn.expand('%:p'),
@@ -81,9 +80,7 @@ local function load_template_content(tmplt_path)
   end)
 
   --- Select handlers
-  local handlers = default_config.handlers[context.template_name]
-    or default_config.handlers[context.filetype]
-    or nil
+  local handlers = default_config.handlers[context.template_name] or default_config.handlers[context.filetype] or nil
 
   local default_replacements = default_handler()
   local user_replacements = handlers and handlers(context, template_path) or {}
@@ -97,10 +94,15 @@ local function load_template_content(tmplt_path)
   end
 
   -- Process position
-  local processed, cursor_pos = utils.process_content(content)
+  local processed, cursor_pos = utils.process_cursor(content)
+  vim.notify(vim.inspect({
+    processed = processed,
+    cursor_pos = cursor_pos,
+  }))
 
   vim.api.nvim_buf_set_lines(0, 0, -1, false, vim.split(processed, '\n'))
-  if cursor_pos then vim.api.nvim_win_set_cursor(0, { cursor_pos, 0 }) end
+  if cursor_pos then vim.api.nvim_win_set_cursor(0, cursor_pos) end
+  -- if cursor_pos then vim.api.nvim_win_set_cursor(0, { cursor_pos, 0 }) end
 end
 
 --[[
