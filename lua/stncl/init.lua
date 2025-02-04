@@ -68,7 +68,7 @@ end
 local function load_template_content(tmplt_path)
   local content = table.concat(vim.fn.readfile(tmplt_path), '\n')
   local context = {
-    fileapth = vim.fn.expand('%:p'),
+    filepath = vim.fn.expand('%:p'),
     template_name = vim.fn.fnamemodify(tmplt_path, ':t'),
     filetype = vim.bo.filetype,
   }
@@ -83,7 +83,7 @@ local function load_template_content(tmplt_path)
   local handlers = default_config.handlers[context.template_name] or default_config.handlers[context.filetype] or nil
 
   local default_replacements = default_handler()
-  local user_replacements = handlers and handlers(context, template_path) or {}
+  local user_replacements = handlers and handlers(context, tmplt_path) or {}
 
   -- expand default replacements with the user replacements
   local replacements = vim.tbl_extend('force', default_replacements, user_replacements)
