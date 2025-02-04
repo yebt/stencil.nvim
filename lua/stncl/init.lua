@@ -1,145 +1,160 @@
----
 local M = {}
 local utils = require('stncl.utils')
-local default_templstes_dir = vim.fn.stdpath('config') .. '/templates'
 
-M.config = {
+--- Set config startert
+local script_path = debug.getinfo(1, 'S').source:sub(2)
+local plugin_root = vim.fn.fnamemodify(script_path, ':h:h:h')
+local default_templates_dir = plugin_root .. '/templates'
+
+--- Default config
+local default_config = {
   templates_dir = vim.fn.stdpath('config') .. '/templates',
-  project_markers = { '.git', 'composer.json', 'package.json' },
-  author = 'User Name',
-  email = 'user@example.com',
+  project_markers = { '.git', 'package.json', 'composer.json', 'cargo.toml' },
+  author = os.getenv('USER') or 'user',
+  email = os.getenv('EMAIL') or 'user@example.com',
   handlers = {},
-  default_handler = function(context, template_name)
-    return {
-      _date_ = os.date('%Y-%m-%d'),
-      _file_name_ = vim.fn.expand('%:t'),
-      _upper_file_ = vim.fn.expand('%:t:r'):upper(),
-      _camel_case_file_ = utils.snake_to_camel(vim.fn.expand('%:t:r')),
-      _author_ = M.config.author,
-      _email_ = M.config.email,
-      _variable_ = utils.to_variable_name(vim.fn.expand('%:t:r')),
-    }
-  end,
 }
 
--- Function to get available templates
-local function get_available_templates()
-  vim.print('get_available_templates')
-  local ft = vim.bo.filetype
-  if ft == '' then return {} end
-  local templates_path = M.config.templates_dir .. '/' .. ft
-  local templates = vim.fn.glob(templates_path .. '/*.*', false, true)
-
-  return vim.tbl_map(function(path) return vim.fn.fnamemodify(path, ':t') end, templates)
+--- Default handler
+-- local default_handler = function(context, template)
+local default_handler = function()
+  return {
+    _date_ = os.date('%Y-%m-%d'),
+    _file_name_ = vim.fn.expand('%:t'),
+    _upper_file_ = vim.fn.expand('%:t:r'):upper(),
+    _camel_case_file_ = utils.snake_to_camel(vim.fn.expand('%:t:r')),
+    _author_ = default_config.author,
+    _email_ = default_config.email,
+    _variable_ = utils.to_variable_name(vim.fn.expand('%:t:r')),
+  }
 end
 
---- Function to process cursor position
-local function process_cursor_position(content)
-  local cursor_pos = {}
-  local lines = {}
-  for i, line in ipairs(vim.split(content, '\n')) do
-    if line:match('{{_cursor_}}') then
-      cursor_pos = { i - 1, line:find('{{_cursor_}}') - 1 }
-      line = line:gsub('{{_cursor_}}', '')
+local function get_template_paths(ft)
+  local user_templates = vim.fn.glob(default_config.templates_dir .. '/' .. ft .. '/*', false, true)
+  local default_templates = vim.fn.glob(default_templates_dir .. '/' .. ft .. '/*', false, true)
+
+  local available_templates = {}
+  local seen = {}
+
+  -- Check templates for user
+  for _, path in ipairs(user_templates) do
+    local name = vim.fn.fnamemodify(path, ':t')
+    if not seen[name] then
+      table.insert(available_templates, path)
+      seen[name] = true
     end
-    table.insert(lines, line)
   end
-  return table.concat(lines, '\n'), cursor_pos
+
+  -- Add default templates
+  for _, path in ipairs(default_templates) do
+    local name = vim.fn.fnamemodify(path, ':t')
+    if not seen[name] then
+      table.insert(available_templates, path)
+      seen[name] = true
+    end
+  end
+
+  return available_templates
 end
 
---- Function to evaluate lua expressions
-local function evaluate_lua_expressions(content)
-  return content:gsub('{{_lua:(.-)}}', function(expr)
-    -- local ok, result = pcall(function() return loadstring('return ' .. expr)() end)
-    local ok, result = pcall(function() return load('return ' .. expr)() end)
-    return ok and result or ''
+--- Get template names from filetype
+local function get_template_names(ft)
+  return vim.tbl_map(function(path) return vim.fn.fnamemodify(path, ':t') end, get_template_paths(ft))
+end
+
+--- Function to load template content
+local function load_template_content(tmplt_path)
+
+  local content = table.concat(vim.fn.readfile(tmplt_path), '\n')
+  local context = {
+    fileapth = vim.fn.expand('%:p'),
+    template_name = vim.fn.fnamemodify(tmplt_path, ':t'),
+    filetype = vim.bo.filetype,
+  }
+
+  --- Process lua expressions
+  content = content:gsub('{{_lua:(.-)}}', function(expr)
+    local ok, res = pcall(vim.api.nvim_eval, expr)
+    return ok and res or ''
   end)
+
+  --- Select handlers
+  local handlers = default_config.handlers[context.template_name]
+    or default_config.handlers[context.filetype]
+    or nil
+
+  local default_replacements = default_handler()
+  local user_replacements = handlers and handlers(context, template_path) or {}
+
+  -- expand default replacements with the user replacements
+  local replacements = vim.tbl_extend('force', default_replacements, user_replacements)
+
+  --- Process handlers
+  for pattern, replacement in pairs(replacements) do
+    content = content:gsub('{{' .. pattern .. '}}', replacement)
+  end
+
+  -- Process position
+  local processed, cursor_pos = utils.process_content(content)
+
+  vim.api.nvim_buf_set_lines(0, 0, -1, false, vim.split(processed, '\n'))
+  if cursor_pos then vim.api.nvim_win_set_cursor(0, { cursor_pos, 0 }) end
 end
 
---- Function fo completion
-local function complete_templates(arg_lead)
-    local templates = get_available_templates()
-    return vim.tbl_filter(function(name)
-        return name:match('^' .. arg_lead)
-    end, templates)
-end
-
--- Function to control with command
-function M.load_template(template_name)
+--[[
+-- tmplt: template string name
+--]]
+function M.load_template(tmplt)
   local ft = vim.bo.filetype
   if ft == '' then return end
 
-  local templates_path = M.config.templates_dir .. '/' .. ft
-  local allowed_templates = get_available_templates()
+  local templates_for_ft = get_template_paths(ft)
+  -- if not exist templates for filetype, abort
+  if #templates_for_ft == 0 then return end
 
-  local function load_selected_template(selected_path)
-    local template_content = table.concat(vim.fn.readfile(selected_path), '\n')
-    local context = {
-      filepath = vim.fn.expand('%:p'),
-      template_name = vim.fn.fnamemodify(selected_path, ':t'),
-      filetype = ft,
-    }
-
-    -- Determine the handler to use
-    local handler = M.config.handlers[context.template_name] or M.config.handlers[ft] or M.config.default_handler
-
-    -- Get replacements
-    local replacements = handler(context, M.config)
-
-    --  Apply replacements
-    template_content = template_content:gsub('{{_(.-)_}}', function(key) return replacements[key] or '' end)
-
-    -- Proces embeded lua expressions
-    template_content = evaluate_lua_expressions(template_content)
-
-    -- Process cursor position
-    local processed_content, cursor_pos = process_cursor_position(template_content)
-
-    -- Insert the content in the current buffer
-    vim.api.nvim_buf_set_lines(0, 0, -1, false, vim.split(processed_content, '\n'))
-
-    -- Set the cursor position if the marker is present
-    if cursor_pos then
-      vim.api.nvim_win_set_cursor(0, { cursor_pos[1] + 1, cursor_pos[2] })
-      vim.cmd('startinsert')
-    end
-  end
-
-  -- Select the template
-  if template_name then
-    -- local full_path = templates_path .. '/' .. template_name .. '.' .. ft
-    local full_path = templates_path .. '/' .. template_name
-    if vim.fn.filereadable(full_path) == 1 then
-      load_selected_template(full_path)
-    else
-      vim.notify('Template not found: ' .. full_path, vim.log.levels.ERROR)
+  if tmplt then
+    for _, tmplt_path in ipairs(templates_for_ft) do
+      if vim.fn.fnamemodify(tmplt_path, ':t') == tmplt then
+        load_template_content(tmplt_path)
+        break
+      end
     end
   else
-    vim.ui.select(
-      vim.tbl_map(function(name) return { name = name, path = templates_path .. '/' .. name } end, allowed_templates),
-      {
-        prompt = 'Select a Template',
-        format_item = function(item) return item.name end,
-      },
-      function(selected)
-        if selected then load_selected_template(selected.path) end
-      end
-    )
+    -- Select template
+    vim.ui.select(templates_for_ft, {
+      prompt = 'Select template',
+      format_item = function(pth)
+        local name = vim.fn.fnamemodify(pth, ':t')
+        -- local source = path:find(config.)
+        return string.format('%s', name)
+      end,
+    }, function(selected_itm) load_template_content(selected_itm) end)
   end
 end
 
-M.setup = function(config)
-  config = vim.tbl_deep_extend('force', M.config, config or {})
-  vim.api.nvim_create_user_command('Stncl', function(opts) M.load_template(opts.args ~= '' and opts.args or nil) end, {
-    nargs = '?',
-    complete = function(_, cmd_line) return complete_templates(cmd_line:match('%S+$')) end,
-  })
+-- TODO:
+-- Allow wildcards
+-- Allow put cursor position
+-- Allow put handlers
+-- Allow resolve templates by ft
 
-  -- vim.api.nvim_create_autocmd('BufNewFile', {
-  --   pattern = '*',
-  --   callback = M.load_template,
-  -- })
+function M.setup(lopts)
+  default_config = vim.tbl_deep_extend('force', default_config, lopts or {})
+
+  -- Command to select template
+  vim.api.nvim_create_user_command(
+    'Stencil',
+    function(opts) M.load_template(opts.args ~= '' and opts.args or nil) end,
+    {
+      nargs = '?',
+      complete = function(_, cmd_line)
+        return vim.tbl_filter(
+          function(elm) return elm:match('^' .. (cmd_line:match('%S+$') or '')) end,
+          get_template_names(vim.bo.filetype)
+        )
+      end,
+    }
+  )
 end
 
----
 return M
