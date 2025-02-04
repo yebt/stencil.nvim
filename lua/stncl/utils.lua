@@ -16,8 +16,9 @@ function M.get_project_root(filepath)
     })[1])
 end
 
-function trim_path(filepath)
-  return filepath:gsub("^" .. vim.env.HOME .. "/", "")
+function M.trim_path(filepath)
+  local p = filepath:gsub("/$", "")
+  return p
 end
 
 return M
