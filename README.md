@@ -1,4 +1,4 @@
-# stencil.nvim 🖋️
+# Stencil.nvim 🖋️
 
 Neovim plugin for smart template management with dynamic content generation
 
