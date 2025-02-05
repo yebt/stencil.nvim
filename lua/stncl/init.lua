@@ -1,12 +1,23 @@
 local M = {}
 local utils = require('stncl.utils')
 
+--- @module stncl
+--- @brief Neovim template management system with dynamic content generation
+
+--- @class Config
+--- @field templates_dir string Path to user templates directory
+--- @field project_markers string[] List of project root marker files
+--- @field author string Default author name
+--- @field email string Default author email
+--- @field handlers table<string, function> Filetype-specific handler functions
+
 --- Set config startert
 local script_path = debug.getinfo(1, 'S').source:sub(2)
 local plugin_root = vim.fn.fnamemodify(script_path, ':h:h:h')
 local default_templates_dir = plugin_root .. '/templates'
 
 --- Default config
+--- @type Config
 local default_config = {
   templates_dir = vim.fn.stdpath('config') .. '/templates',
   project_markers = { '.git', 'package.json', 'composer.json', 'cargo.toml' },
@@ -17,7 +28,8 @@ local default_config = {
 
 --- Default handler
 -- local default_handler = function(context, template)
-local default_handler = function()
+--- @return table<string, string> Key-value pairs of default replacements
+local default_handler = function(_, _)
   return {
     -- _date_ = os.date('%Y-%m-%d'),
     _date_ = utils.format_date(),
@@ -31,6 +43,9 @@ local default_handler = function()
   }
 end
 
+--- Get all available template paths for given filetype
+--- @param ft string Filetype to get templates for
+--- @return string[] List of full template paths
 local function get_template_paths(ft)
   local user_templates = vim.fn.glob(default_config.templates_dir .. '/' .. ft .. '/*', false, true)
   local default_templates = vim.fn.glob(default_templates_dir .. '/' .. ft .. '/*', false, true)
@@ -59,41 +74,54 @@ local function get_template_paths(ft)
   return available_templates
 end
 
---- Get template names from filetype
+--- Get template names for current filetype
+--- @param ft string Filetype to get template names for
+--- @return string[] List of template names
 local function get_template_names(ft)
   return vim.tbl_map(function(path) return vim.fn.fnamemodify(path, ':t') end, get_template_paths(ft))
 end
 
---- Function to load template content
+--- Load and process template content into current buffer
+--- @param tmplt_path string Full path to template file
 local function load_template_content(tmplt_path)
   local content = table.concat(vim.fn.readfile(tmplt_path), '\n')
+
+  --- @class TemplateContext
+  --- @field filepath string Full path to current file
+  --- @field template_name string Name of the loaded template
+  --- @field filetype string Current buffer filetype
+  --- @field config Config Current plugin configuration
+
   local context = {
     filepath = vim.fn.expand('%:p'),
     template_name = vim.fn.fnamemodify(tmplt_path, ':t'),
     filetype = vim.bo.filetype,
+    config = default_config,
   }
 
   --- Process lua expressions
   content = content:gsub('{{_lua:(.-)}}', function(expr)
-    local ok, res = pcall(vim.api.nvim_eval, expr)
-    return ok and res or ''
+    -- local ok, res = pcall(vim.api.nvim_eval, expr)
+    local ok, res = pcall(utils.safe_eval, expr)
+    return ok and tostring(res) or ''
   end)
 
-  --- Select handlers
-  local handlers = default_config.handlers[context.template_name] or default_config.handlers[context.filetype] or nil
-
-  local default_replacements = default_handler()
   local okm, default_filetype_replacements = pcall(require, 'stncl.handlers.' .. context.filetype)
-  default_filetype_replacements = okm and default_filetype_replacements(context, tmplt_path) or {}
-  local user_replacements = handlers and handlers(context, tmplt_path) or {}
-  local user_filetype_replacements = handlers and handlers[context.filetype] or {}
+  -- Resolve appropriate handler function
+  local handler_chain = {
+    default_handler,                                -- default handler
+    okm and default_filetype_replacements or nil,   -- default filetype handler
+    default_config.handlers[context.template_name], -- user specific template handler
+    default_config.handlers[context.filetype],      -- user specific filetype handler
+  }
+  local replacements = {}
+  for _, handler in ipairs(handler_chain) do
+    if handler then
+      replacements = vim.tbl_extend('force', replacements, (handler(context, tmplt_path) or {}))
+    end
+  end
 
-  -- expand default replacements with the user replacements
-  default_replacements = vim.tbl_extend('force', default_replacements, default_filetype_replacements)
-  local replacements = vim.tbl_extend('force', default_replacements, user_filetype_replacements)
-  replacements = vim.tbl_extend('force', default_replacements, user_replacements)
-
-  --- Process handlers
+  -- Apply all replacements
   for pattern, replacement in pairs(replacements) do
     content = content:gsub('{{' .. pattern .. '}}', replacement)
   end
@@ -104,24 +132,30 @@ local function load_template_content(tmplt_path)
   if cursor_pos then vim.api.nvim_win_set_cursor(0, cursor_pos) end
 end
 
---[[
--- tmplt: template string name
---]]
+--- Load template into current buffer
+--- @param tmplt? string Optional template name to load directly
 function M.load_template(tmplt)
   local ft = vim.bo.filetype
-  if ft == '' then return end
+  if ft == '' then
+    vim.notify('No filetype detected', vim.log.levels.WARN)
+    return
+  end
 
   local templates_for_ft = get_template_paths(ft)
   -- if not exist templates for filetype, abort
-  if #templates_for_ft == 0 then return end
+  if #templates_for_ft == 0 then
+    vim.notify('No templates available for filetype: ' .. ft, vim.log.levels.INFO)
+    return
+  end
 
   if tmplt then
     for _, tmplt_path in ipairs(templates_for_ft) do
       if vim.fn.fnamemodify(tmplt_path, ':t') == tmplt then
         load_template_content(tmplt_path)
-        break
+        return
       end
     end
+    vim.notify('Template not found: ' .. tmplt, vim.log.levels.WARN)
   else
     -- Select template
     vim.ui.select(templates_for_ft, {
@@ -135,7 +169,8 @@ function M.load_template(tmplt)
   end
 end
 
-
+--- Setup plugin configuration
+--- @param lopts? Config Partial configuration to merge with defaults
 function M.setup(lopts)
   default_config = vim.tbl_deep_extend('force', default_config, lopts or {})
 
@@ -151,6 +186,7 @@ function M.setup(lopts)
           get_template_names(vim.bo.filetype)
         )
       end,
+      desc = 'Load template for current filetype'
     }
   )
 end
