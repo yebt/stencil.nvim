@@ -2,6 +2,12 @@
 
 Neovim plugin for smart template management with dynamic content generation
 
+## Demo
+
+In this demo show how insert a php class php preset
+
+![stencil-nvim](https://github.com/user-attachments/assets/5b882ad2-c892-4646-bf6e-fff7e5dd33d5)
+
 ## Features ✨
 
 - Filetype-specific template handling
