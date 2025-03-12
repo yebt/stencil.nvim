@@ -129,7 +129,8 @@ local function load_template_content(tmplt_path)
   -- Process position
   local processed, cursor_pos = utils.process_cursor(content)
   vim.api.nvim_buf_set_lines(0, 0, -1, false, vim.split(processed, '\n'))
-  if cursor_pos then vim.api.nvim_win_set_cursor(0, cursor_pos) end
+
+  if cursor_pos and next(cursor_pos) then vim.api.nvim_win_set_cursor(0, cursor_pos) end
 end
 
 --- Load template into current buffer
